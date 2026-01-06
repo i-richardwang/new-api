@@ -82,9 +82,21 @@ export default function SettingsMonitoring(props) {
 
   useEffect(() => {
     const currentInputs = {};
-    for (let key in props.options) {
-      if (Object.keys(inputs).includes(key)) {
+    const defaultValues = {
+      ChannelDisableThreshold: '',
+      QuotaRemindThreshold: '',
+      AutomaticDisableChannelEnabled: false,
+      AutomaticEnableChannelEnabled: false,
+      AutomaticDisableKeywords: '',
+      ChannelSelectMode: 'random',
+      'monitor_setting.auto_test_channel_enabled': false,
+      'monitor_setting.auto_test_channel_minutes': 10,
+    };
+    for (let key in defaultValues) {
+      if (props.options.hasOwnProperty(key)) {
         currentInputs[key] = props.options[key];
+      } else {
+        currentInputs[key] = defaultValues[key];
       }
     }
     setInputs(currentInputs);

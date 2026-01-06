@@ -106,6 +106,7 @@ var QuotaRemindThreshold = 1000
 var PreConsumedQuota = 500
 
 var RetryTimes = 0
+var ChannelSelectMode = "random" // 渠道选择模式: random(随机), sticky(粘性，一直用一个直到失败)
 
 //var RootUserEmail = ""
 

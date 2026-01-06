@@ -38,6 +38,7 @@ export default function SettingsMonitoring(props) {
     AutomaticDisableChannelEnabled: false,
     AutomaticEnableChannelEnabled: false,
     AutomaticDisableKeywords: '',
+    ChannelSelectMode: 'random',
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10,
   });
@@ -203,6 +204,22 @@ export default function SettingsMonitoring(props) {
                     })
                   }
                 />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Select
+                  field={'ChannelSelectMode'}
+                  label={t('渠道选择模式')}
+                  extraText={t('random: 随机选择; sticky: 固定使用一个渠道直到出错')}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      ChannelSelectMode: value,
+                    })
+                  }
+                >
+                  <Form.Select.Option value='random'>{t('随机 (random)')}</Form.Select.Option>
+                  <Form.Select.Option value='sticky'>{t('粘性 (sticky)')}</Form.Select.Option>
+                </Form.Select>
               </Col>
             </Row>
             <Row gutter={16}>

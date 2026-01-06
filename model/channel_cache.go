@@ -18,6 +18,41 @@ var group2model2channels map[string]map[string][]int // enabled channel
 var channelsIDM map[int]*Channel                     // all channels include disabled
 var channelSyncLock sync.RWMutex
 
+// 粘性模式的渠道索引存储
+// key: "group:model:priority" -> 当前使用的渠道在该优先级渠道列表中的索引
+var stickyChannelIndex sync.Map
+
+// getStickyKey 生成粘性索引的key
+func getStickyKey(group, model string, priority int64) string {
+	return fmt.Sprintf("%s:%s:%d", group, model, priority)
+}
+
+// GetStickyChannelIndex 获取当前粘性索引
+func GetStickyChannelIndex(group, model string, priority int64) int {
+	key := getStickyKey(group, model, priority)
+	if val, ok := stickyChannelIndex.Load(key); ok {
+		return val.(int)
+	}
+	return 0
+}
+
+// AdvanceStickyChannelIndex 切换到下一个渠道（当前渠道失败时调用）
+func AdvanceStickyChannelIndex(group, model string, priority int64, totalChannels int) {
+	if totalChannels <= 1 {
+		return
+	}
+	key := getStickyKey(group, model, priority)
+	for {
+		oldVal, _ := stickyChannelIndex.LoadOrStore(key, 0)
+		oldIdx := oldVal.(int)
+		newIdx := (oldIdx + 1) % totalChannels
+		if stickyChannelIndex.CompareAndSwap(key, oldIdx, newIdx) {
+			common.SysLog(fmt.Sprintf("sticky channel switched: %s, from index %d to %d", key, oldIdx, newIdx))
+			break
+		}
+	}
+}
+
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
 		return
@@ -159,6 +194,18 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 		return nil, errors.New(fmt.Sprintf("no channel found, group: %s, model: %s, priority: %d", group, model, targetPriority))
 	}
 
+	// 粘性模式：一直使用同一个渠道，直到失败时才切换
+	if common.ChannelSelectMode == "sticky" {
+		stickyIdx := GetStickyChannelIndex(group, model, targetPriority)
+		// 确保索引在有效范围内
+		if stickyIdx >= len(targetChannels) {
+			stickyIdx = 0
+		}
+		return targetChannels[stickyIdx], nil
+	}
+
+	// 随机模式（默认）：加权随机选择
+
 	// smoothing factor and adjustment
 	smoothingFactor := 1
 	smoothingAdjustment := 0
@@ -188,6 +235,32 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 	// return null if no channel is not found
 	return nil, errors.New("channel not found")
+}
+
+// GetChannelCountByGroupModelPriority 获取指定分组、模型、优先级下的渠道数量
+// 用于粘性模式下计算可切换的渠道总数
+func GetChannelCountByGroupModelPriority(group, model string, priority int64) int {
+	if !common.MemoryCacheEnabled {
+		return 0 // 非内存缓存模式暂不支持
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	channels := group2model2channels[group][model]
+	if len(channels) == 0 {
+		return 0
+	}
+
+	count := 0
+	for _, channelId := range channels {
+		if channel, ok := channelsIDM[channelId]; ok {
+			if channel.GetPriority() == priority {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func CacheGetChannel(id int) (*Channel, error) {

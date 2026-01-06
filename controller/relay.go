@@ -342,6 +342,51 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return true
 }
 
+// shouldAdvanceStickyChannel 判断是否应该切换粘性渠道
+// 逻辑与 shouldRetry 保持一致：只要会触发重试的错误，都应该触发粘性切换
+func shouldAdvanceStickyChannel(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	// 渠道级错误
+	if types.IsChannelError(err) {
+		return true
+	}
+	// 明确跳过重试的错误
+	if types.IsSkipRetryError(err) {
+		return false
+	}
+	// 429 Too Many Requests
+	if err.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	// 307 重定向
+	if err.StatusCode == 307 {
+		return true
+	}
+	// 5xx 服务器错误（超时除外）
+	if err.StatusCode/100 == 5 {
+		if err.StatusCode == 504 || err.StatusCode == 524 {
+			return false
+		}
+		return true
+	}
+	// 400 Bad Request 不切换
+	if err.StatusCode == http.StatusBadRequest {
+		return false
+	}
+	// 408 超时不切换
+	if err.StatusCode == 408 {
+		return false
+	}
+	// 2xx 成功不切换
+	if err.StatusCode/100 == 2 {
+		return false
+	}
+	// 其他错误（包括 401、403 等）都切换
+	return true
+}
+
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, err.Error()))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
@@ -350,6 +395,18 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.Error())
 		})
+	}
+
+	// 粘性模式：当渠道出错时，切换到下一个渠道
+	if common.ChannelSelectMode == "sticky" && shouldAdvanceStickyChannel(err) {
+		group := c.GetString("group")
+		modelName := c.GetString("original_model")
+		priority := common.GetContextKeyInt64(c, constant.ContextKeyChannelPriority)
+		// 获取同优先级渠道数量
+		totalChannels := model.GetChannelCountByGroupModelPriority(group, modelName, priority)
+		if totalChannels > 1 {
+			model.AdvanceStickyChannelIndex(group, modelName, priority, totalChannels)
+		}
 	}
 
 	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {

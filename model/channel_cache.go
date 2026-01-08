@@ -22,6 +22,17 @@ var channelSyncLock sync.RWMutex
 // key: "group:model:priority" -> 当前使用的渠道在该优先级渠道列表中的索引
 var stickyChannelIndex sync.Map
 
+// 粘性模式预切换：时间窗口内的请求计数器
+// key: "group:model:priority" -> *WindowCounter
+var stickyWindowCounter sync.Map
+
+// WindowCounter 记录时间窗口内的请求数
+type WindowCounter struct {
+	count       int
+	windowStart time.Time
+	mu          sync.Mutex
+}
+
 // getStickyKey 生成粘性索引的key
 func getStickyKey(group, model string, priority int64) string {
 	return fmt.Sprintf("%s:%s:%d", group, model, priority)
@@ -48,8 +59,65 @@ func AdvanceStickyChannelIndex(group, model string, priority int64, totalChannel
 		newIdx := (oldIdx + 1) % totalChannels
 		if stickyChannelIndex.CompareAndSwap(key, oldIdx, newIdx) {
 			common.SysLog(fmt.Sprintf("sticky channel switched: %s, from index %d to %d", key, oldIdx, newIdx))
+			// 切换渠道后重置计数器
+			resetStickyWindowCounter(key)
 			break
 		}
+	}
+}
+
+// RecordStickyRequest 记录一次成功请求，返回是否应该主动切换渠道
+// 仅在粘性模式且配置了预切换参数时生效
+func RecordStickyRequest(group, model string, priority int64, totalChannels int) bool {
+	// 只有多渠道才需要切换
+	if totalChannels <= 1 {
+		return false
+	}
+	// 检查是否启用了预切换功能
+	// windowSeconds <= 0 或 maxRequests <= 1 都视为禁用（maxRequests=1 没有意义，等同于每次都切换）
+	windowSeconds := common.StickyWindowSeconds
+	maxRequests := common.StickyMaxRequestsInWindow
+	if windowSeconds <= 0 || maxRequests <= 1 {
+		return false
+	}
+
+	key := getStickyKey(group, model, priority)
+	now := time.Now()
+	windowDuration := time.Duration(windowSeconds) * time.Second
+
+	// 获取或创建计数器
+	val, _ := stickyWindowCounter.LoadOrStore(key, &WindowCounter{
+		count:       0,
+		windowStart: now,
+	})
+	counter := val.(*WindowCounter)
+
+	counter.mu.Lock()
+	defer counter.mu.Unlock()
+
+	// 窗口过期，重置
+	if now.Sub(counter.windowStart) > windowDuration {
+		counter.count = 1
+		counter.windowStart = now
+		return false
+	}
+
+	counter.count++
+	if counter.count >= maxRequests {
+		// 达到阈值，需要切换
+		return true
+	}
+	return false
+}
+
+// resetStickyWindowCounter 重置计数器（切换渠道后调用）
+func resetStickyWindowCounter(key string) {
+	if val, ok := stickyWindowCounter.Load(key); ok {
+		counter := val.(*WindowCounter)
+		counter.mu.Lock()
+		counter.count = 0
+		counter.windowStart = time.Now()
+		counter.mu.Unlock()
 	}
 }
 
@@ -248,6 +316,11 @@ func GetChannelCountByGroupModelPriority(group, model string, priority int64) in
 	defer channelSyncLock.RUnlock()
 
 	channels := group2model2channels[group][model]
+	// 如果没找到，尝试归一化模型名（与 GetRandomSatisfiedChannel 保持一致）
+	if len(channels) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(model)
+		channels = group2model2channels[group][normalizedModel]
+	}
 	if len(channels) == 0 {
 		return 0
 	}

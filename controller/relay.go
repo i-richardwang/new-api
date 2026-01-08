@@ -211,6 +211,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			// 粘性模式预切换：请求成功后检查是否需要主动切换渠道
+			if common.ChannelSelectMode == "sticky" {
+				group := getStickyGroup(c)
+				modelName := c.GetString("original_model")
+				priority := common.GetContextKeyInt64(c, constant.ContextKeyChannelPriority)
+				totalChannels := model.GetChannelCountByGroupModelPriority(group, modelName, priority)
+				if model.RecordStickyRequest(group, modelName, priority, totalChannels) {
+					model.AdvanceStickyChannelIndex(group, modelName, priority, totalChannels)
+				}
+			}
 			return
 		}
 
@@ -387,6 +397,17 @@ func shouldAdvanceStickyChannel(err *types.NewAPIError) bool {
 	return true
 }
 
+// getStickyGroup 获取粘性模式使用的分组
+// 优先使用 auto 模式选出的实际分组，否则使用 UsingGroup
+func getStickyGroup(c *gin.Context) string {
+	// auto 分组时，使用实际选中的分组
+	if autoGroup := common.GetContextKeyString(c, constant.ContextKeyAutoGroup); autoGroup != "" {
+		return autoGroup
+	}
+	// 普通分组，使用 UsingGroup
+	return common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+}
+
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, err.Error()))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
@@ -399,7 +420,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 
 	// 粘性模式：当渠道出错时，切换到下一个渠道
 	if common.ChannelSelectMode == "sticky" && shouldAdvanceStickyChannel(err) {
-		group := c.GetString("group")
+		group := getStickyGroup(c)
 		modelName := c.GetString("original_model")
 		priority := common.GetContextKeyInt64(c, constant.ContextKeyChannelPriority)
 		// 获取同优先级渠道数量
@@ -415,7 +436,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		tokenName := c.GetString("token_name")
 		modelName := c.GetString("original_model")
 		tokenId := c.GetInt("token_id")
-		userGroup := c.GetString("group")
+		userGroup := getStickyGroup(c)
 		channelId := c.GetInt("channel_id")
 		other := make(map[string]interface{})
 		if c.Request != nil && c.Request.URL != nil {

@@ -39,6 +39,8 @@ export default function SettingsMonitoring(props) {
     AutomaticEnableChannelEnabled: false,
     AutomaticDisableKeywords: '',
     ChannelSelectMode: 'random',
+    StickyWindowSeconds: 0,
+    StickyMaxRequestsInWindow: 0,
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10,
   });
@@ -89,6 +91,8 @@ export default function SettingsMonitoring(props) {
       AutomaticEnableChannelEnabled: false,
       AutomaticDisableKeywords: '',
       ChannelSelectMode: 'random',
+      StickyWindowSeconds: 0,
+      StickyMaxRequestsInWindow: 0,
       'monitor_setting.auto_test_channel_enabled': false,
       'monitor_setting.auto_test_channel_minutes': 10,
     };
@@ -232,6 +236,42 @@ export default function SettingsMonitoring(props) {
                   <Form.Select.Option value='random'>{t('随机 (random)')}</Form.Select.Option>
                   <Form.Select.Option value='sticky'>{t('粘性 (sticky)')}</Form.Select.Option>
                 </Form.Select>
+              </Col>
+            </Row>
+            <Row gutter={16}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('粘性模式预切换时间窗口')}
+                  step={1}
+                  min={0}
+                  suffix={t('秒')}
+                  extraText={t('在此时间窗口内达到请求阈值时主动切换渠道，0表示禁用')}
+                  placeholder={''}
+                  field={'StickyWindowSeconds'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      StickyWindowSeconds: parseInt(value) || 0,
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('粘性模式预切换请求阈值')}
+                  step={1}
+                  min={0}
+                  suffix={t('次')}
+                  extraText={t('时间窗口内达到此请求数时主动切换渠道，0表示禁用')}
+                  placeholder={''}
+                  field={'StickyMaxRequestsInWindow'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      StickyMaxRequestsInWindow: parseInt(value) || 0,
+                    })
+                  }
+                />
               </Col>
             </Row>
             <Row gutter={16}>

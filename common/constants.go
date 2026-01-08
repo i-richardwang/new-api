@@ -108,6 +108,10 @@ var PreConsumedQuota = 500
 var RetryTimes = 0
 var ChannelSelectMode = "random" // 渠道选择模式: random(随机), sticky(粘性，一直用一个直到失败)
 
+// 粘性模式预切换配置：在时间窗口内请求达到阈值时主动切换渠道，避免触发 rate limit
+var StickyWindowSeconds = 0          // 时间窗口（秒），0 表示禁用预切换
+var StickyMaxRequestsInWindow = 0    // 窗口内最大请求数，达到后切换渠道
+
 //var RootUserEmail = ""
 
 var IsMasterNode bool

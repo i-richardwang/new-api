@@ -19,15 +19,15 @@ var channelsIDM map[int]*Channel                     // all channels include dis
 var channelSyncLock sync.RWMutex
 
 // 粘性模式的渠道索引存储
-// key: "group:model:priority" -> 当前使用的渠道在该优先级渠道列表中的索引
+// key: "group:priority" -> 当前使用的渠道索引（所有模型共享，一个渠道出问题所有模型都切走）
 var stickyChannelIndex sync.Map
 
 // 粘性模式预切换：时间窗口内的请求计数器
-// key: "group:model:priority" -> *WindowCounter
+// key: "group:priority" -> *WindowCounter
 var stickyWindowCounter sync.Map
 
 // 粘性模式：记录当前渠道开始使用的时间
-// key: "group:model:priority" -> time.Time
+// key: "group:priority" -> time.Time
 var stickyChannelStartTime sync.Map
 
 // WindowCounter 记录时间窗口内的请求数
@@ -37,14 +37,14 @@ type WindowCounter struct {
 	mu          sync.Mutex
 }
 
-// getStickyKey 生成粘性索引的key
-func getStickyKey(group, model string, priority int64) string {
-	return fmt.Sprintf("%s:%s:%d", group, model, priority)
+// getStickyKey 生成粘性索引的key（按 group:priority，所有模型共享）
+func getStickyKey(group string, priority int64) string {
+	return fmt.Sprintf("%s:%d", group, priority)
 }
 
 // GetStickyChannelIndex 获取当前粘性索引
-func GetStickyChannelIndex(group, model string, priority int64) int {
-	key := getStickyKey(group, model, priority)
+func GetStickyChannelIndex(group string, priority int64) int {
+	key := getStickyKey(group, priority)
 	if val, ok := stickyChannelIndex.Load(key); ok {
 		return val.(int)
 	}
@@ -52,15 +52,13 @@ func GetStickyChannelIndex(group, model string, priority int64) int {
 }
 
 // AdvanceStickyChannelIndex 切换到下一个渠道（当前渠道失败时调用）
-func AdvanceStickyChannelIndex(group, model string, priority int64, totalChannels int) {
-	if totalChannels <= 1 {
-		return
-	}
-	key := getStickyKey(group, model, priority)
+// 注意：直接 +1 不取模，因为不同模型的渠道数量可能不同，选择时再取模
+func AdvanceStickyChannelIndex(group string, priority int64) {
+	key := getStickyKey(group, priority)
 	for {
 		oldVal, _ := stickyChannelIndex.LoadOrStore(key, 0)
 		oldIdx := oldVal.(int)
-		newIdx := (oldIdx + 1) % totalChannels
+		newIdx := oldIdx + 1
 		if stickyChannelIndex.CompareAndSwap(key, oldIdx, newIdx) {
 			common.SysLog(fmt.Sprintf("sticky channel switched: %s, from index %d to %d", key, oldIdx, newIdx))
 			// 切换渠道后重置计数器和开始时间
@@ -73,11 +71,7 @@ func AdvanceStickyChannelIndex(group, model string, priority int64, totalChannel
 
 // RecordStickyRequest 记录一次成功请求，返回是否应该主动切换渠道
 // 仅在粘性模式且配置了预切换参数时生效
-func RecordStickyRequest(group, model string, priority int64, totalChannels int) bool {
-	// 只有多渠道才需要切换
-	if totalChannels <= 1 {
-		return false
-	}
+func RecordStickyRequest(group string, priority int64) bool {
 	// 检查是否启用了预切换功能
 	// windowSeconds <= 0 或 maxRequests <= 1 都视为禁用（maxRequests=1 没有意义，等同于每次都切换）
 	windowSeconds := common.StickyWindowSeconds
@@ -86,7 +80,7 @@ func RecordStickyRequest(group, model string, priority int64, totalChannels int)
 		return false
 	}
 
-	key := getStickyKey(group, model, priority)
+	key := getStickyKey(group, priority)
 	now := time.Now()
 	windowDuration := time.Duration(windowSeconds) * time.Second
 
@@ -128,18 +122,14 @@ func resetStickyWindowCounter(key string) {
 
 // ShouldSwitchByMaxHours 检查当前渠道是否已使用超过最大时长
 // 返回 true 表示应该切换渠道
-func ShouldSwitchByMaxHours(group, model string, priority int64, totalChannels int) bool {
-	// 只有多渠道才需要切换
-	if totalChannels <= 1 {
-		return false
-	}
+func ShouldSwitchByMaxHours(group string, priority int64) bool {
 	// 检查是否启用了最大时长限制
 	maxHours := common.StickyMaxHours
 	if maxHours <= 0 {
 		return false
 	}
 
-	key := getStickyKey(group, model, priority)
+	key := getStickyKey(group, priority)
 	now := time.Now()
 
 	// 获取或初始化开始时间
@@ -300,16 +290,12 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 
 	// 粘性模式：一直使用同一个渠道，直到失败时才切换
+	// 注意：索引按 group:priority 共享，所有模型共用，一个渠道出问题所有模型都切走
 	if common.ChannelSelectMode == "sticky" {
-		stickyIdx := GetStickyChannelIndex(group, model, targetPriority)
-		// 确保索引在有效范围内（渠道数量可能减少）
-		if stickyIdx >= len(targetChannels) {
-			stickyIdx = 0
-			// 回写归零值，避免后续切换时使用越界的旧值
-			key := getStickyKey(group, model, targetPriority)
-			stickyChannelIndex.Store(key, 0)
-		}
-		return targetChannels[stickyIdx], nil
+		stickyIdx := GetStickyChannelIndex(group, targetPriority)
+		// 用取模确保索引在有效范围内（不同模型的渠道数量可能不同）
+		actualIdx := stickyIdx % len(targetChannels)
+		return targetChannels[actualIdx], nil
 	}
 
 	// 随机模式（默认）：加权随机选择
@@ -343,37 +329,6 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 	// return null if no channel is not found
 	return nil, errors.New("channel not found")
-}
-
-// GetChannelCountByGroupModelPriority 获取指定分组、模型、优先级下的渠道数量
-// 用于粘性模式下计算可切换的渠道总数
-func GetChannelCountByGroupModelPriority(group, model string, priority int64) int {
-	if !common.MemoryCacheEnabled {
-		return 0 // 非内存缓存模式暂不支持
-	}
-
-	channelSyncLock.RLock()
-	defer channelSyncLock.RUnlock()
-
-	channels := group2model2channels[group][model]
-	// 如果没找到，尝试归一化模型名（与 GetRandomSatisfiedChannel 保持一致）
-	if len(channels) == 0 {
-		normalizedModel := ratio_setting.FormatMatchingModelName(model)
-		channels = group2model2channels[group][normalizedModel]
-	}
-	if len(channels) == 0 {
-		return 0
-	}
-
-	count := 0
-	for _, channelId := range channels {
-		if channel, ok := channelsIDM[channelId]; ok {
-			if channel.GetPriority() == priority {
-				count++
-			}
-		}
-	}
-	return count
 }
 
 func CacheGetChannel(id int) (*Channel, error) {

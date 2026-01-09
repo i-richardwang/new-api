@@ -214,13 +214,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			// 粘性模式预切换：请求成功后检查是否需要主动切换渠道
 			if common.ChannelSelectMode == "sticky" {
 				group := getStickyGroup(c)
-				modelName := c.GetString("original_model")
 				priority := common.GetContextKeyInt64(c, constant.ContextKeyChannelPriority)
-				totalChannels := model.GetChannelCountByGroupModelPriority(group, modelName, priority)
 				// 检查是否需要切换：请求数达到阈值 或 超过最大使用时长
-				if model.RecordStickyRequest(group, modelName, priority, totalChannels) ||
-					model.ShouldSwitchByMaxHours(group, modelName, priority, totalChannels) {
-					model.AdvanceStickyChannelIndex(group, modelName, priority, totalChannels)
+				if model.RecordStickyRequest(group, priority) ||
+					model.ShouldSwitchByMaxHours(group, priority) {
+					model.AdvanceStickyChannelIndex(group, priority)
 				}
 			}
 			return
@@ -420,16 +418,11 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		})
 	}
 
-	// 粘性模式：当渠道出错时，切换到下一个渠道
+	// 粘性模式：当渠道出错时，切换到下一个渠道（所有模型共享，一个渠道出问题所有模型都切走）
 	if common.ChannelSelectMode == "sticky" && shouldAdvanceStickyChannel(err) {
 		group := getStickyGroup(c)
-		modelName := c.GetString("original_model")
 		priority := common.GetContextKeyInt64(c, constant.ContextKeyChannelPriority)
-		// 获取同优先级渠道数量
-		totalChannels := model.GetChannelCountByGroupModelPriority(group, modelName, priority)
-		if totalChannels > 1 {
-			model.AdvanceStickyChannelIndex(group, modelName, priority, totalChannels)
-		}
+		model.AdvanceStickyChannelIndex(group, priority)
 	}
 
 	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {

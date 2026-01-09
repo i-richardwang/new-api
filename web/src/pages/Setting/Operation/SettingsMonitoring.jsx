@@ -41,6 +41,7 @@ export default function SettingsMonitoring(props) {
     ChannelSelectMode: 'random',
     StickyWindowSeconds: 0,
     StickyMaxRequestsInWindow: 0,
+    StickyMaxHours: 0,
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10,
   });
@@ -93,6 +94,7 @@ export default function SettingsMonitoring(props) {
       ChannelSelectMode: 'random',
       StickyWindowSeconds: 0,
       StickyMaxRequestsInWindow: 0,
+      StickyMaxHours: 0,
       'monitor_setting.auto_test_channel_enabled': false,
       'monitor_setting.auto_test_channel_minutes': 10,
     };
@@ -269,6 +271,23 @@ export default function SettingsMonitoring(props) {
                     setInputs({
                       ...inputs,
                       StickyMaxRequestsInWindow: parseInt(value) || 0,
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('粘性模式最大使用时长')}
+                  step={1}
+                  min={0}
+                  suffix={t('小时')}
+                  extraText={t('单个渠道持续使用超过此时长后切换，0表示禁用')}
+                  placeholder={''}
+                  field={'StickyMaxHours'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      StickyMaxHours: parseInt(value) || 0,
                     })
                   }
                 />

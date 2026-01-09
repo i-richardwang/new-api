@@ -129,6 +129,7 @@ func InitOptionMap() {
 	common.OptionMap["ChannelSelectMode"] = common.ChannelSelectMode
 	common.OptionMap["StickyWindowSeconds"] = strconv.Itoa(common.StickyWindowSeconds)
 	common.OptionMap["StickyMaxRequestsInWindow"] = strconv.Itoa(common.StickyMaxRequestsInWindow)
+	common.OptionMap["StickyMaxHours"] = strconv.Itoa(common.StickyMaxHours)
 	common.OptionMap["DataExportInterval"] = strconv.Itoa(common.DataExportInterval)
 	common.OptionMap["DataExportDefaultTime"] = common.DataExportDefaultTime
 	common.OptionMap["DefaultCollapseSidebar"] = strconv.FormatBool(common.DefaultCollapseSidebar)
@@ -417,6 +418,8 @@ func updateOptionMap(key string, value string) (err error) {
 		common.StickyWindowSeconds, _ = strconv.Atoi(value)
 	case "StickyMaxRequestsInWindow":
 		common.StickyMaxRequestsInWindow, _ = strconv.Atoi(value)
+	case "StickyMaxHours":
+		common.StickyMaxHours, _ = strconv.Atoi(value)
 	case "DataExportInterval":
 		common.DataExportInterval, _ = strconv.Atoi(value)
 	case "DataExportDefaultTime":

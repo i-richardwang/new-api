@@ -26,6 +26,10 @@ var stickyChannelIndex sync.Map
 // key: "group:model:priority" -> *WindowCounter
 var stickyWindowCounter sync.Map
 
+// 粘性模式：记录当前渠道开始使用的时间
+// key: "group:model:priority" -> time.Time
+var stickyChannelStartTime sync.Map
+
 // WindowCounter 记录时间窗口内的请求数
 type WindowCounter struct {
 	count       int
@@ -59,8 +63,9 @@ func AdvanceStickyChannelIndex(group, model string, priority int64, totalChannel
 		newIdx := (oldIdx + 1) % totalChannels
 		if stickyChannelIndex.CompareAndSwap(key, oldIdx, newIdx) {
 			common.SysLog(fmt.Sprintf("sticky channel switched: %s, from index %d to %d", key, oldIdx, newIdx))
-			// 切换渠道后重置计数器
+			// 切换渠道后重置计数器和开始时间
 			resetStickyWindowCounter(key)
+			stickyChannelStartTime.Store(key, time.Now())
 			break
 		}
 	}
@@ -119,6 +124,38 @@ func resetStickyWindowCounter(key string) {
 		counter.windowStart = time.Now()
 		counter.mu.Unlock()
 	}
+}
+
+// ShouldSwitchByMaxHours 检查当前渠道是否已使用超过最大时长
+// 返回 true 表示应该切换渠道
+func ShouldSwitchByMaxHours(group, model string, priority int64, totalChannels int) bool {
+	// 只有多渠道才需要切换
+	if totalChannels <= 1 {
+		return false
+	}
+	// 检查是否启用了最大时长限制
+	maxHours := common.StickyMaxHours
+	if maxHours <= 0 {
+		return false
+	}
+
+	key := getStickyKey(group, model, priority)
+	now := time.Now()
+
+	// 获取或初始化开始时间
+	val, loaded := stickyChannelStartTime.LoadOrStore(key, now)
+	if !loaded {
+		// 首次使用，刚初始化，不需要切换
+		return false
+	}
+
+	startTime := val.(time.Time)
+	maxDuration := time.Duration(maxHours) * time.Hour
+
+	if now.Sub(startTime) >= maxDuration {
+		return true
+	}
+	return false
 }
 
 func InitChannelCache() {
@@ -265,9 +302,12 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	// 粘性模式：一直使用同一个渠道，直到失败时才切换
 	if common.ChannelSelectMode == "sticky" {
 		stickyIdx := GetStickyChannelIndex(group, model, targetPriority)
-		// 确保索引在有效范围内
+		// 确保索引在有效范围内（渠道数量可能减少）
 		if stickyIdx >= len(targetChannels) {
 			stickyIdx = 0
+			// 回写归零值，避免后续切换时使用越界的旧值
+			key := getStickyKey(group, model, targetPriority)
+			stickyChannelIndex.Store(key, 0)
 		}
 		return targetChannels[stickyIdx], nil
 	}

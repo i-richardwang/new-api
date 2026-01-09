@@ -217,7 +217,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				modelName := c.GetString("original_model")
 				priority := common.GetContextKeyInt64(c, constant.ContextKeyChannelPriority)
 				totalChannels := model.GetChannelCountByGroupModelPriority(group, modelName, priority)
-				if model.RecordStickyRequest(group, modelName, priority, totalChannels) {
+				// 检查是否需要切换：请求数达到阈值 或 超过最大使用时长
+				if model.RecordStickyRequest(group, modelName, priority, totalChannels) ||
+					model.ShouldSwitchByMaxHours(group, modelName, priority, totalChannels) {
 					model.AdvanceStickyChannelIndex(group, modelName, priority, totalChannels)
 				}
 			}

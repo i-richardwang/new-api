@@ -292,7 +292,13 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	// 粘性模式：一直使用同一个渠道，直到失败时才切换
 	// 注意：索引按 group:priority 共享，所有模型共用，一个渠道出问题所有模型都切走
 	if common.ChannelSelectMode == "sticky" {
-		stickyIdx := GetStickyChannelIndex(group, targetPriority)
+		key := getStickyKey(group, targetPriority)
+		// 首次访问时随机初始化索引，避免重启后总是从第一个渠道开始
+		val, loaded := stickyChannelIndex.LoadOrStore(key, rand.Intn(len(targetChannels)))
+		stickyIdx := val.(int)
+		if !loaded {
+			common.SysLog(fmt.Sprintf("sticky channel initialized: %s, random index %d", key, stickyIdx))
+		}
 		// 用取模确保索引在有效范围内（不同模型的渠道数量可能不同）
 		actualIdx := stickyIdx % len(targetChannels)
 		return targetChannels[actualIdx], nil

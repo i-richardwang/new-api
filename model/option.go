@@ -415,11 +415,17 @@ func updateOptionMap(key string, value string) (err error) {
 			common.ChannelSelectMode = value
 		}
 	case "StickyWindowSeconds":
-		common.StickyWindowSeconds, _ = strconv.Atoi(value)
+		if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+			common.StickyWindowSeconds = int(floatVal)
+		}
 	case "StickyMaxRequestsInWindow":
-		common.StickyMaxRequestsInWindow, _ = strconv.Atoi(value)
+		if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+			common.StickyMaxRequestsInWindow = int(floatVal)
+		}
 	case "StickyMaxHours":
-		common.StickyMaxHours, _ = strconv.Atoi(value)
+		if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+			common.StickyMaxHours = int(floatVal)
+		}
 	case "DataExportInterval":
 		common.DataExportInterval, _ = strconv.Atoi(value)
 	case "DataExportDefaultTime":

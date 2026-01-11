@@ -192,6 +192,10 @@ func Interface2String(inter interface{}) string {
 	case int:
 		return fmt.Sprintf("%d", inter.(int))
 	case float64:
+		// 如果是整数值，格式化为整数字符串，避免 "960.000000" 这样的格式
+		if inter.(float64) == float64(int64(inter.(float64))) {
+			return fmt.Sprintf("%d", int64(inter.(float64)))
+		}
 		return fmt.Sprintf("%f", inter.(float64))
 	case bool:
 		if inter.(bool) {
